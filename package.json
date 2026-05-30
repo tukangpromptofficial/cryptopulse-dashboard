@@ -1,0 +1,12 @@
+{
+  "name": "cryptopulse",
+  "version": "1.0.0",
+  "description": "Live crypto dashboard with real Binance WebSocket data",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
