@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CryptoPulse — Live Binance Stream</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'SF Mono', 'Menlo', monospace;
+    background: #0a0e1a;
+    color: #e8eaf0;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #1a2235;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+  }
+  h1 .pulse {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    background: #00ff9d;
+    border-radius: 50%;
+    margin-right: 10px;
+    animation: pulse 1.5s ease-in-out infinite;
+    vertical-align: middle;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,255,157,0.7); }
+    50% { opacity: 0.5; box-shadow: 0 0 0 8px rgba(0,255,157,0); }
+  }
+  .status { font-size: 12px; color: #6a7390; }
+  .status.live { color: #00ff9d; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: #121829;
+    border: 1px solid #1a2235;
+    border-radius: 12px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+  .card.flash-up { animation: flashUp 0.6s; }
+  .card.flash-down { animation: flashDown 0.6s; }
+  @keyframes flashUp {
+    0% { background: #003d28; border-color: #00ff9d; }
+    100% { background: #121829; border-color: #1a2235; }
+  }
+  @keyframes flashDown {
+    0% { background: #3d0010; border-color: #ff3d6e; }
+    100% { background: #121829; border-color: #1a2235; }
+  }
+  .card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 12px;
+  }
+  .symbol { font-size: 14px; font-weight: 600; letter-spacing: 1px; color: #8a93b0; }
+  .change {
+    font-size: 13px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 6px;
+  }
+  .change.up { background: rgba(0,255,157,0.15); color: #00ff9d; }
+  .change.down { background: rgba(255,61,110,0.15); color: #ff3d6e; }
+  .price { font-size: 28px; font-weight: 700; letter-spacing: -1px; margin-bottom: 12px; font-variant-numeric: tabular-nums; }
+  .price.up { color: #00ff9d; }
+  .price.down { color: #ff3d6e; }
+  .meta { display: flex; justify-content: space-between; font-size: 11px; color: #6a7390; }
+  .meta span b { color: #a8b0cc; font-weight: 500; }
+  svg.spark { width: 100%; height: 40px; margin: 8px 0; }
+  footer { margin-top: 24px; font-size: 11px; color: #4a5370; text-align: center; }
+  footer a { color: #6a7390; text-decoration: none; }
+  footer a:hover { color: #00ff9d; }
+</style>
+</head>
+<body>
+  <header>
+    <h1><span class="pulse"></span>CryptoPulse</h1>
+    <div class="status" id="status">connecting...</div>
+  </header>
+  <div class="grid" id="grid"></div>
+  <footer>Live data from Binance WebSocket Stream · Built by OPENCLAW · Project #011 · <a href="https://github.com/tukangpromptofficial/cryptopulse-dashboard" target="_blank">source</a></footer>
+
+<script>
+const SYMBOLS = {
+  BTCUSDT: 'BTC',
+  ETHUSDT: 'ETH',
+  SOLUSDT: 'SOL',
+  BNBUSDT: 'BNB',
+  XRPUSDT: 'XRP',
+  DOGEUSDT: 'DOGE',
+  ADAUSDT: 'ADA',
+  AVAXUSDT: 'AVAX'
+};
+
+const grid = document.getElementById('grid');
+const status = document.getElementById('status');
+const cards = {};
+const histories = {};
+const MAX_HISTORY = 60;
+
+function fmtPrice(p) {
+  if (p >= 1000) return p.toFixed(2);
+  if (p >= 1) return p.toFixed(3);
+  return p.toFixed(5);
+}
+
+function fmtVol(v) {
+  if (v >= 1e9) return (v/1e9).toFixed(2) + 'B';
+  if (v >= 1e6) return (v/1e6).toFixed(2) + 'M';
+  if (v >= 1e3) return (v/1e3).toFixed(2) + 'K';
+  return v.toFixed(0);
+}
+
+function sparkline(history) {
+  if (history.length < 2) return '';
+  const min = Math.min(...history);
+  const max = Math.max(...history);
+  const range = max - min || 1;
+  const pts = history.map((p, i) => {
+    const x = (i / (history.length - 1)) * 100;
+    const y = 100 - ((p - min) / range) * 100;
+    return `${x},${y}`;
+  }).join(' ');
+  const last = history[history.length - 1];
+  const first = history[0];
+  const color = last >= first ? '#00ff9d' : '#ff3d6e';
+  return `<svg class="spark" viewBox="0 0 100 100" preserveAspectRatio="none">
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/>
+  </svg>`;
+}
+
+function render(sym, d) {
+  let card = cards[sym];
+  if (!card) {
+    card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="card-top">
+        <div class="symbol"></div>
+        <div class="change"></div>
+      </div>
+      <div class="price">--</div>
+      <div class="spark-wrap"></div>
+      <div class="meta">
+        <span>H <b class="hi">--</b></span>
+        <span>L <b class="lo">--</b></span>
+        <span>VOL <b class="vol">--</b></span>
+      </div>
+    `;
+    grid.appendChild(card);
+    cards[sym] = card;
+  }
+  card.querySelector('.symbol').textContent = d.symbol;
+  const priceEl = card.querySelector('.price');
+  const oldPrice = parseFloat(priceEl.dataset.val || 0);
+  priceEl.textContent = '$' + fmtPrice(d.price);
+  priceEl.dataset.val = d.price;
+  if (oldPrice && d.price !== oldPrice) {
+    card.classList.remove('flash-up', 'flash-down');
+    void card.offsetWidth;
+    card.classList.add(d.price > oldPrice ? 'flash-up' : 'flash-down');
+  }
+  const changeEl = card.querySelector('.change');
+  const up = d.change24h >= 0;
+  changeEl.className = 'change ' + (up ? 'up' : 'down');
+  changeEl.textContent = (up ? '+' : '') + d.change24h.toFixed(2) + '%';
+  priceEl.className = 'price ' + (up ? 'up' : 'down');
+  card.querySelector('.hi').textContent = fmtPrice(d.high);
+  card.querySelector('.lo').textContent = fmtPrice(d.low);
+  card.querySelector('.vol').textContent = fmtVol(d.volume);
+  card.querySelector('.spark-wrap').innerHTML = sparkline(d.history || []);
+}
+
+function connect() {
+  const streams = Object.keys(SYMBOLS).map(s => s.toLowerCase() + '@ticker').join('/');
+  const ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
+
+  ws.onopen = () => {
+    status.textContent = 'LIVE · streaming from Binance';
+    status.className = 'status live';
+  };
+  ws.onclose = () => {
+    status.textContent = 'disconnected · reconnecting...';
+    status.className = 'status';
+    setTimeout(connect, 2000);
+  };
+  ws.onerror = () => ws.close();
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    const t = msg.data;
+    if (!t || !SYMBOLS[t.s]) return;
+    const price = parseFloat(t.c);
+    if (!histories[t.s]) histories[t.s] = [];
+    histories[t.s].push(price);
+    if (histories[t.s].length > MAX_HISTORY) histories[t.s].shift();
+    render(t.s, {
+      symbol: SYMBOLS[t.s],
+      price,
+      change24h: parseFloat(t.P),
+      high: parseFloat(t.h),
+      low: parseFloat(t.l),
+      volume: parseFloat(t.q),
+      history: histories[t.s]
+    });
+  };
+}
+
+connect();
+</script>
+</body>
+</html>
